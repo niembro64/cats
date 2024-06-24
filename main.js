@@ -8,11 +8,11 @@ const seedrandom = require('seedrandom');
 const IMAGE_SIZE = 128;
 const BATCH_SIZE = 32;
 const TRAIN_TEST_SPLIT = 0.8;
-const EPOCHS = 1;
-const LEARNING_RATE = 0.000001; // Further reduced learning rate
+const EPOCHS = 10;
+const LEARNING_RATE = 0.0001; // Further reduced learning rate
 const SEED = 5;
 const MODEL_SAVE_PATH = './trained_model.json';
-const USE_SMALL = true;
+const USE_SMALL = false;
 
 // Set global seeds
 const rng = seedrandom(SEED);
@@ -80,12 +80,31 @@ const getBarsFromPercent = (percent) => {
 
 // Load all images
 (async function () {
+  const pathCats = './cats';
+  const pathCatsSmall = './cats_small';
+  const pathNotCats = './not_cats';
+  const pathNotCatsSmall = './not_cats_small';
+
+  const lengthCats = fs.readdirSync(pathCats).length;
+  const lengthCatsSmall = fs.readdirSync(pathCatsSmall).length;
+  const lengthNotCats = fs.readdirSync(pathNotCats).length;
+  const lengthNotCatsSmall = fs.readdirSync(pathNotCatsSmall).length;
+
+  const totalNormal = lengthCats + lengthNotCats;
+  const totalSmall = lengthCatsSmall + lengthNotCatsSmall;
+
+  // print all
+  console.log('Total cats:', lengthCats);
+  console.log('Total cats small:', lengthCatsSmall);
+  console.log('Total not cats:', lengthNotCats);
+  console.log('Total not cats small:', lengthNotCatsSmall);
+
   const cats = await loadImagesFromFolder(
-    USE_SMALL ? './cats_small' : './cats',
+    USE_SMALL ? pathCatsSmall : pathCats,
     1
   );
   const notCats = await loadImagesFromFolder(
-    USE_SMALL ? './not_cats_small' : './not_cats',
+    USE_SMALL ? pathNotCatsSmall : pathNotCats,
     0
   );
 
@@ -139,14 +158,21 @@ const getBarsFromPercent = (percent) => {
     clip_gradients: 5.0, // Add gradient clipping
   });
 
-  for (let epoch = 0; epoch < EPOCHS; epoch++) {
+  let percentDone = 0;
+  for (let epoch = 0;epoch < EPOCHS;epoch++) {
+
+    shuffleArray(trainImages, rng);
+
     for (let i = 0; i < trainImages.length; i += BATCH_SIZE) {
       for (let j = 0; j < BATCH_SIZE && i + j < trainImages.length; j++) {
+        percentDone = (i + j) / (trainImages.length * EPOCHS);
+
         const { vol, label, fileName } = trainImages[i + j];
         const stats = trainer.train(vol, label);
         const loss = stats.loss;
 
         print(label, loss, fileName);
+        printPercentDone(percentDone);
       }
     }
   }
@@ -174,4 +200,9 @@ const print = (label, prediction, fileName) => {
   console.log(
     color + prediction.toFixed(4) + ' ' + bars + ' ' + fileName + reset
   );
+};
+
+const printPercentDone = (percent) => {
+  const bars = getBarsFromPercent(percent);
+  console.log(bars + ' ' + (percent * 100).toFixed(2) + '%');
 };
