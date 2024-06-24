@@ -8,6 +8,7 @@ const BATCH_SIZE = 32;
 const TRAIN_TEST_SPLIT = 0.8;
 const EPOCHS = 10;
 const USE_SMALL = true;
+const LEARNING_RATE = 0.001; // Custom learning rate
 
 // Helper function to load images
 function loadImagesFromFolder(folderPath, label) {
@@ -60,10 +61,6 @@ function createDataset(imagePaths, batchSize) {
           continue;
         }
         const labelTensor = tf.tensor1d([label]);
-        // Check and print shape
-        console.log(
-          `Processed image: ${filename}, shape: ${imageTensor.shape}`
-        );
         yield { xs: imageTensor, ys: labelTensor };
       } catch (err) {
         console.error(
@@ -97,9 +94,10 @@ model.add(tf.layers.flatten());
 model.add(tf.layers.dense({ units: 128, activation: 'relu' }));
 model.add(tf.layers.dense({ units: 1, activation: 'sigmoid' }));
 
-// Compile the model
+// Compile the model with custom learning rate
+const optimizer = tf.train.adam(LEARNING_RATE);
 model.compile({
-  optimizer: tf.train.adam(),
+  optimizer: optimizer,
   loss: tf.losses.sigmoidCrossEntropy,
   metrics: ['accuracy'],
 });
@@ -184,6 +182,7 @@ async function predictOnTestData() {
     const progressBar = getBarsFromPercent(inference);
 
     console.log(label === 1 ? red : green, `${progressBar} ${reset}`);
+    // console.log(inference);
   }
 }
 
