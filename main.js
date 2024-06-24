@@ -61,6 +61,20 @@ function shuffleArray(array, rng) {
   }
 }
 
+const red = '\x1b[31m';
+const green = '\x1b[32m';
+const reset = '\x1b[0m';
+
+const blockChar = '█';
+const dashChar = '─';
+const getBarsFromPercent = (percent) => {
+  const width = 30;
+  const progress = Math.round(width * percent);
+  const bar =
+    blockChar.repeat(progress) + dashChar.repeat(Math.max(0, width - progress));
+  return bar;
+};
+
 // Load all images
 (async function () {
   const cats = await loadImagesFromFolder('./cats_small', 1);
@@ -114,42 +128,36 @@ function shuffleArray(array, rng) {
   });
 
   for (let epoch = 0; epoch < EPOCHS; epoch++) {
-    let batchLoss = 0;
     for (let i = 0; i < trainImages.length; i += BATCH_SIZE) {
       for (let j = 0; j < BATCH_SIZE && i + j < trainImages.length; j++) {
         const { vol, label, fileName } = trainImages[i + j];
         const stats = trainer.train(vol, label);
-        batchLoss += stats.loss;
-        console.log(
-          `Epoch ${epoch + 1}, Sample ${
-            i + j + 1
-          }, File: ${fileName}, Label: ${label}, Loss: ${stats.loss}`
-        );
+        const loss = stats.loss;
+
+        print(label, loss, fileName);
       }
-      console.log(
-        `Epoch ${epoch + 1}, Batch ${
-          Math.floor(i / BATCH_SIZE) + 1
-        }, Average Loss: ${batchLoss / BATCH_SIZE}`
-      );
-      batchLoss = 0; // Reset batch loss after each batch
     }
   }
 
   // Save the trained model
   saveNetwork(net, MODEL_SAVE_PATH);
 
-  // Evaluate the model
-  let correct = 0;
-  for (const { vol, label } of testImages) {
+  for (const { vol, label, fileName } of testImages) {
     const prediction = net.forward(vol);
-    const predictedLabel = prediction.w[1] > prediction.w[0] ? 1 : 0;
 
-    console.log(
-      `Predicted: ${predictedLabel}, Actual: ${label}, Confidence: ${prediction.w[predictedLabel]}`
-    );
-    if (predictedLabel === label) correct++;
+    const p = prediction.w[0];
+    print(label, p, fileName);
   }
-  console.log(
-    `Test Accuracy: ${((correct / testImages.length) * 100).toFixed(2)}%`
-  );
+  for (const { vol, label } of trainImages) {
+    const prediction = net.forward(vol);
+    const p = prediction.w[0];
+    print(label, p);
+  }
 })();
+
+const print = (label, prediction, fileName) => {
+  const bars = getBarsFromPercent(prediction);
+  const color = label === 1 ? red : green;
+
+  console.log(color + prediction.toFixed(4) + bars + fileName + reset);
+};
