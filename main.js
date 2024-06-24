@@ -6,9 +6,11 @@ const path = require('path');
 const IMAGE_SIZE = 128;
 const BATCH_SIZE = 32;
 const TRAIN_TEST_SPLIT = 0.8;
-const EPOCHS = 10;
+const EPOCHS = 1;
 const USE_SMALL = true;
 const LEARNING_RATE = 0.001; // Custom learning rate
+const SEED = 3; // Seed for reproducibility
+
 
 // Helper function to load images
 function loadImagesFromFolder(folderPath, label) {
@@ -29,8 +31,8 @@ const notCats = loadImagesFromFolder(
 
 const allImages = cats.concat(notCats);
 
-// Shuffle and split data into training and testing sets
-tf.util.shuffle(allImages);
+// Shuffle and split data into training and testing sets with a seed
+tf.util.shuffle(allImages, SEED);
 const splitIndex = Math.floor(TRAIN_TEST_SPLIT * allImages.length);
 const trainImages = allImages.slice(0, splitIndex);
 const testImages = allImages.slice(splitIndex);
@@ -85,14 +87,34 @@ model.add(
     filters: 32,
     kernelSize: 3,
     activation: 'relu',
+    kernelInitializer: tf.initializers.glorotUniform({ seed: SEED }),
   })
 );
 model.add(tf.layers.maxPooling2d({ poolSize: [2, 2] }));
-model.add(tf.layers.conv2d({ filters: 64, kernelSize: 3, activation: 'relu' }));
+model.add(
+  tf.layers.conv2d({
+    filters: 64,
+    kernelSize: 3,
+    activation: 'relu',
+    kernelInitializer: tf.initializers.glorotUniform({ seed: SEED }),
+  })
+);
 model.add(tf.layers.maxPooling2d({ poolSize: [2, 2] }));
 model.add(tf.layers.flatten());
-model.add(tf.layers.dense({ units: 128, activation: 'relu' }));
-model.add(tf.layers.dense({ units: 1, activation: 'sigmoid' }));
+model.add(
+  tf.layers.dense({
+    units: 128,
+    activation: 'relu',
+    kernelInitializer: tf.initializers.glorotUniform({ seed: SEED }),
+  })
+);
+model.add(
+  tf.layers.dense({
+    units: 1,
+    activation: 'sigmoid',
+    kernelInitializer: tf.initializers.glorotUniform({ seed: SEED }),
+  })
+);
 
 // Compile the model with custom learning rate
 const optimizer = tf.train.adam(LEARNING_RATE);
@@ -183,6 +205,20 @@ async function predictOnTestData() {
 
     console.log(label === 1 ? red : green, `${progressBar} ${reset}`);
     // console.log(inference);
+  }
+  for (let imageInfo of trainImages) {
+    const { imagePath, label, filename } = imageInfo;
+    const imageTensor = preprocessImage(imagePath).expandDims();
+    const prediction = model.predict(imageTensor);
+    const inference = prediction.dataSync()[0];
+
+    const progressBar = getBarsFromPercent(inference);
+
+    console.log(
+      label === 1 ? red : green,
+      `${progressBar} ${reset} ${filename}`
+    );
+    console.log(inference.toFixed(4));
   }
 }
 
