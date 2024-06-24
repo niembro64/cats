@@ -12,6 +12,7 @@ const EPOCHS = 1;
 const LEARNING_RATE = 0.000001; // Further reduced learning rate
 const SEED = 5;
 const MODEL_SAVE_PATH = './trained_model.json';
+const USE_SMALL = true;
 
 // Set global seeds
 const rng = seedrandom(SEED);
@@ -79,8 +80,14 @@ const getBarsFromPercent = (percent) => {
 
 // Load all images
 (async function () {
-  const cats = await loadImagesFromFolder('./cats_small', 1);
-  const notCats = await loadImagesFromFolder('./not_cats_small', 0);
+  const cats = await loadImagesFromFolder(
+    USE_SMALL ? './cats_small' : './cats',
+    1
+  );
+  const notCats = await loadImagesFromFolder(
+    USE_SMALL ? './not_cats_small' : './not_cats',
+    0
+  );
 
   const allImages = cats.concat(notCats);
 
