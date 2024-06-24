@@ -7,6 +7,7 @@ const IMAGE_SIZE = 128;
 const BATCH_SIZE = 32;
 const TRAIN_TEST_SPLIT = 0.8;
 const EPOCHS = 10;
+const USE_SMALL = true;
 
 // Helper function to load images
 function loadImagesFromFolder(folderPath, label) {
@@ -18,12 +19,10 @@ function loadImagesFromFolder(folderPath, label) {
   }));
 }
 
-const useSmall = true;
-
 // Load all images
-const cats = loadImagesFromFolder(useSmall ? './cats_small' : './cats', 1);
+const cats = loadImagesFromFolder(USE_SMALL ? './cats_small' : './cats', 1);
 const notCats = loadImagesFromFolder(
-  useSmall ? './not_cats_small' : './not_cats',
+  USE_SMALL ? './not_cats_small' : './not_cats',
   0
 );
 
@@ -161,39 +160,31 @@ async function saveModel() {
   console.log(`Model saved to ${savePath}`);
 }
 
+const blockChar = '█';
+const dashChar = '─';
+const getBarsFromPercent = (percent) => {
+  const width = 30;
+  const progress = Math.round(width * percent);
+  const bar = blockChar.repeat(progress) + dashChar.repeat(width - progress);
+  return bar;
+};
+
+const red = '\u001b[31m';
+const green = '\u001b[32m';
+const reset = '\u001b[0m';
+
 // Predict on test data
 async function predictOnTestData() {
-  const predictions = [];
-  const labels = [];
-  const filenames = [];
-
   for (let imageInfo of testImages) {
     const { imagePath, label, filename } = imageInfo;
     const imageTensor = preprocessImage(imagePath).expandDims();
     const prediction = model.predict(imageTensor);
-    const predictedLabel = prediction.dataSync()[0] > 0.5 ? 1 : 0;
+    const inference = prediction.dataSync()[0];
 
-    predictions.push(predictedLabel);
-    labels.push(label);
-    filenames.push(filename);
-  }
+    const progressBar = getBarsFromPercent(inference);
 
-  // Output detailed prediction results
-  for (let i = 0; i < predictions.length; i++) {
-    console.log(
-      `Filename: ${filenames[i]} | Predicted: ${predictions[i]} | Actual: ${labels[i]}`
-    );
+    console.log(label === 1 ? red : green, `${progressBar} ${reset}`);
   }
-
-  // Calculate accuracy
-  let correct = 0;
-  for (let i = 0; i < predictions.length; i++) {
-    if (predictions[i] === labels[i]) {
-      correct++;
-    }
-  }
-  const accuracy = (correct / predictions.length) * 100;
-  console.log(`Prediction Accuracy on Test Data: ${accuracy.toFixed(2)}%`);
 }
 
 // Execute training

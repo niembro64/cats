@@ -1,4 +1,7 @@
 {
+  "scripts": {
+    "start": "node main.js"
+  },
   "dependencies": {
     "@tensorflow/tfjs": "^4.20.0",
     "@tensorflow/tfjs-node": "^4.20.0"
