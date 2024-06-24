@@ -9,7 +9,7 @@ const IMAGE_SIZE = 128;
 const BATCH_SIZE = 32;
 const TRAIN_TEST_SPLIT = 0.8;
 const EPOCHS = 1;
-const LEARNING_RATE = 0.0001;
+const LEARNING_RATE = 0.000001; // Further reduced learning rate
 const SEED = 5;
 const MODEL_SAVE_PATH = './trained_model.json';
 
@@ -127,6 +127,9 @@ const getBarsFromPercent = (percent) => {
     method: 'adadelta',
     batch_size: BATCH_SIZE,
     l2_decay: 0.001,
+    learning_rate: LEARNING_RATE,
+    momentum: 0.9,
+    clip_gradients: 5.0, // Add gradient clipping
   });
 
   for (let epoch = 0; epoch < EPOCHS; epoch++) {
@@ -150,10 +153,10 @@ const getBarsFromPercent = (percent) => {
     const p = prediction.w[0];
     print(label, p, fileName);
   }
-  for (const { vol, label } of trainImages) {
+  for (const { vol, label, fileName } of trainImages) {
     const prediction = net.forward(vol);
     const p = prediction.w[0];
-    print(label, p);
+    print(label, p, fileName);
   }
 })();
 
