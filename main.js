@@ -5,8 +5,9 @@ const path = require('path');
 // Constants
 const IMAGE_SIZE = 128;
 const BATCH_SIZE = 32;
-const TRAIN_TEST_SPLIT = 0.8;
+const TRAIN_TEST_SPLIT = 0.95;
 const EPOCHS = 10;
+const USE_SMALL = true;
 
 // Helper function to load images
 function loadImagesFromFolder(folderPath, label) {
@@ -18,12 +19,10 @@ function loadImagesFromFolder(folderPath, label) {
   }));
 }
 
-const useSmall = true;
-
 // Load all images
-const cats = loadImagesFromFolder(useSmall ? './cats_small' : './cats', 1);
+const cats = loadImagesFromFolder(USE_SMALL ? './cats_small' : './cats', 1);
 const notCats = loadImagesFromFolder(
-  useSmall ? './not_cats_small' : './not_cats',
+  USE_SMALL ? './not_cats_small' : './not_cats',
   0
 );
 
@@ -62,9 +61,9 @@ function createDataset(imagePaths, batchSize) {
         }
         const labelTensor = tf.tensor1d([label]);
         // Check and print shape
-        console.log(
-          `Processed image: ${filename}, shape: ${imageTensor.shape}`
-        );
+        // console.log(
+        //   `Processed image: ${filename}, shape: ${imageTensor.shape}`
+        // );
         yield { xs: imageTensor, ys: labelTensor };
       } catch (err) {
         console.error(
@@ -161,6 +160,16 @@ async function saveModel() {
   console.log(`Model saved to ${savePath}`);
 }
 
+const barChar = '█';
+const dashChar = '-';
+const getBarsFromFraction = (fraction, maxbars) => {
+  const numBars = fraction * maxbars;
+  const numFullBars = Math.floor(numBars);
+  const numDashes = maxbars - numFullBars;
+
+  return `${barChar.repeat(numFullBars)}${dashChar.repeat(numDashes)}`;
+};
+
 // Predict on test data
 async function predictOnTestData() {
   const predictions = [];
@@ -171,17 +180,27 @@ async function predictOnTestData() {
     const { imagePath, label, filename } = imageInfo;
     const imageTensor = preprocessImage(imagePath).expandDims();
     const prediction = model.predict(imageTensor);
-    const predictedLabel = prediction.dataSync()[0] > 0.5 ? 1 : 0;
 
-    predictions.push(predictedLabel);
+    predictions.push(prediction);
     labels.push(label);
     filenames.push(filename);
   }
 
+  const green = '\x1b[32m';
+  const red = '\x1b[31m';
+  const reset = '\x1b[0m';
+
   // Output detailed prediction results
-  for (let i = 0; i < predictions.length; i++) {
+  for (let i = 0;i < predictions.length;i++) {
+    
+    const prediction = predictions[i].dataSync()[0];
+    const blocks = getBarsFromFraction(prediction, 30);
+    const label = labels[i] === 1;
+
+    const color = label === true ? green : red;
+
     console.log(
-      `Filename: ${filenames[i]} | Predicted: ${predictions[i]} | Actual: ${labels[i]}`
+      color + `Prediction: ${blocks} ${filenames[i]} ${prediction}` + reset
     );
   }
 
