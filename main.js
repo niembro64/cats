@@ -1,28 +1,23 @@
 const fs = require('fs');
 const path = require('path');
-const convnetjs = require('convnetjs');
 const sharp = require('sharp');
 const seedrandom = require('seedrandom');
+const tf = require('@tensorflow/tfjs-node'); // Add TensorFlow.js Node.js backend
 
 // Constants
-const IMAGE_SIZE = 128;
+const IMAGE_SIZE = 256; // Update image size to match ResNet input size
 const BATCH_SIZE = 32;
 const TRAIN_TEST_SPLIT = 0.8;
 const EPOCHS = 10;
 const LEARNING_RATE = 0.0001; // Further reduced learning rate
 const SEED = 5;
-const MODEL_SAVE_PATH = './trained_model.json';
-const USE_SMALL = false;
+const USE_SMALL = true;
 
 // Set global seeds
 const rng = seedrandom(SEED);
 Math.random = rng;
-convnetjs.randf = (a, b) => a + (b - a) * rng();
-convnetjs.randi = (a, b) => Math.floor(a + (b - a) * rng());
-convnetjs.randn = (mu, std) =>
-  mu + std * (Math.sqrt(-2 * Math.log(rng())) * Math.cos(2 * Math.PI * rng()));
 
-// Helper function to load images and convert them to Vol objects
+// Helper function to load images and convert them to tf.Tensor objects
 async function loadImagesFromFolder(folderPath, label) {
   const files = fs.readdirSync(folderPath);
   const imageElements = []; // Array to store image elements
@@ -33,25 +28,15 @@ async function loadImagesFromFolder(folderPath, label) {
         .resize(IMAGE_SIZE, IMAGE_SIZE)
         .raw()
         .toBuffer();
-      const vol = new convnetjs.Vol(IMAGE_SIZE, IMAGE_SIZE, 3);
-      for (let i = 0; i < imageBuffer.length; i += 3) {
-        vol.w[(i / 3) * 3] = imageBuffer[i] / 255.0; // R
-        vol.w[(i / 3) * 3 + 1] = imageBuffer[i + 1] / 255.0; // G
-        vol.w[(i / 3) * 3 + 2] = imageBuffer[i + 2] / 255.0; // B
-      }
-      imageElements.push({ vol, label, fileName: file });
+      const imageTensor = tf
+        .tensor3d(new Uint8Array(imageBuffer), [IMAGE_SIZE, IMAGE_SIZE, 3])
+        .div(255.0);
+      imageElements.push({ tensor: imageTensor, label, fileName: file });
     } catch (error) {
       console.error(`Error processing image ${file}: ${error.message}`);
     }
   }
   return imageElements;
-}
-
-// Function to save the network to a file
-function saveNetwork(net, filePath) {
-  const json = net.toJSON();
-  fs.writeFileSync(filePath, JSON.stringify(json));
-  console.log(`Model saved to ${filePath}`);
 }
 
 // Shuffle function that uses the seed
@@ -62,20 +47,113 @@ function shuffleArray(array, rng) {
   }
 }
 
-const red = '\x1b[31m';
-const green = '\x1b[32m';
-const reset = '\x1b[0m';
+// Build the ResNet model
+const modelResNet = () => {
+  const input = tf.input({ shape: [IMAGE_SIZE, IMAGE_SIZE, 3] });
+  const conv1_filter = tf.layers
+    .conv2d({
+      kernelSize: 5,
+      filters: 16,
+      strides: 2,
+      activation: 'relu',
+      padding: 'same',
+      kernelInitializer: 'glorotNormal',
+    })
+    .apply(input);
+  const conv1 = tf.layers
+    .maxPooling2d({
+      poolSize: [3, 3],
+      strides: [2, 2],
+      padding: 'same',
+    })
+    .apply(conv1_filter);
 
-const blockChar = '█';
-const dashChar = '─';
-const getBarsFromPercent = (percent) => {
-  percent = Math.min(1, Math.max(0, percent));
+  // conv 2
+  const residual2 = residualBlock(conv1, 16, true);
 
-  const width = 30;
-  const progress = Math.round(width * percent);
-  const bar =
-    blockChar.repeat(progress) + dashChar.repeat(Math.max(0, width - progress));
-  return bar;
+  // conv3
+  const residual3 = residualBlock(residual2, 32);
+
+  // conv4
+  const residual4 = residualBlock(residual3, 64);
+
+  // conv5
+  const residual5 = residualBlock(residual4, 128);
+  const conv5 = tf.layers
+    .avgPool2d({
+      poolSize: [8, 8],
+      strides: [1, 1],
+    })
+    .apply(residual5);
+
+  const flatten = tf.layers.flatten().apply(conv5);
+  const dropout = tf.layers.dropout({ rate: 0.5 }).apply(flatten);
+  const dense = tf.layers
+    .dense({
+      units: 2,
+      kernelInitializer: 'glorotNormal',
+      activation: 'softmax', // softmax for categorical / relu
+    })
+    .apply(dropout);
+
+  return tf.model({
+    inputs: input,
+    outputs: dense,
+  });
+};
+
+// Batch normalisation and ReLU always go together, let's add them to the separate function
+const batchNormRelu = (input) => {
+  const batch = tf.layers.batchNormalization().apply(input);
+  return tf.layers.reLU().apply(batch);
+};
+
+// Residual block
+const residualBlock = (input, filters, noDownSample = false) => {
+  let stride = noDownSample ? 1 : 2;
+
+  const filter1 = tf.layers
+    .separableConv2d({
+      kernelSize: 3,
+      filters,
+      activation: 'relu',
+      padding: 'same',
+      strides: stride,
+      depthwiseInitializer: 'glorotNormal',
+      pointwiseInitializer: 'glorotNormal',
+    })
+    .apply(input);
+  const filter1norm = batchNormRelu(filter1);
+
+  const filter2 = tf.layers
+    .separableConv2d({
+      kernelSize: 3,
+      filters,
+      activation: 'relu',
+      padding: 'same',
+      depthwiseInitializer: 'glorotNormal',
+      pointwiseInitializer: 'glorotNormal',
+    })
+    .apply(filter1norm);
+  const dropout = tf.layers.dropout({ rate: 0.3 }).apply(filter2);
+  const batchNorm = batchNormRelu(dropout);
+
+  let inputAdjusted = input;
+  if (!noDownSample) {
+    inputAdjusted = tf.layers
+      .conv2d({
+        kernelSize: 1,
+        filters,
+        strides: stride,
+        padding: 'same',
+        kernelInitializer: 'glorotNormal',
+      })
+      .apply(input);
+  }
+
+  // Residual connection - here we sum up the adjusted input and the result of 2 convolutions
+  const residual = tf.layers.add().apply([inputAdjusted, batchNorm]);
+  return residual;
 };
 
 // Load all images
@@ -84,20 +162,6 @@ const getBarsFromPercent = (percent) => {
   const pathCatsSmall = './cats_small';
   const pathNotCats = './not_cats';
   const pathNotCatsSmall = './not_cats_small';
-
-  const lengthCats = fs.readdirSync(pathCats).length;
-  const lengthCatsSmall = fs.readdirSync(pathCatsSmall).length;
-  const lengthNotCats = fs.readdirSync(pathNotCats).length;
-  const lengthNotCatsSmall = fs.readdirSync(pathNotCatsSmall).length;
-
-  const totalNormal = lengthCats + lengthNotCats;
-  const totalSmall = lengthCatsSmall + lengthNotCatsSmall;
-
-  // print all
-  console.log('Total cats:', lengthCats);
-  console.log('Total cats small:', lengthCatsSmall);
-  console.log('Total not cats:', lengthNotCats);
-  console.log('Total not cats small:', lengthNotCatsSmall);
 
   const cats = await loadImagesFromFolder(
     USE_SMALL ? pathCatsSmall : pathCats,
@@ -116,93 +180,38 @@ const getBarsFromPercent = (percent) => {
   const trainImages = allImages.slice(0, splitIndex);
   const testImages = allImages.slice(splitIndex);
 
-  // Build the model
-  const layerDefs = [];
-  layerDefs.push({
-    type: 'input',
-    out_sx: IMAGE_SIZE,
-    out_sy: IMAGE_SIZE,
-    out_depth: 3,
-  });
-  layerDefs.push({
-    type: 'conv',
-    sx: 3,
-    filters: 32,
-    stride: 1,
-    pad: 2,
-    activation: 'relu',
-  });
-  layerDefs.push({ type: 'pool', sx: 2, stride: 2 });
-  layerDefs.push({
-    type: 'conv',
-    sx: 3,
-    filters: 64,
-    stride: 1,
-    pad: 2,
-    activation: 'relu',
-  });
-  layerDefs.push({ type: 'pool', sx: 2, stride: 2 });
-  layerDefs.push({ type: 'fc', num_neurons: 128, activation: 'relu' });
-  layerDefs.push({ type: 'softmax', num_classes: 2 });
+  // Prepare training and testing datasets
+  const trainXs = tf.stack(trainImages.map(({ tensor }) => tensor));
+  const trainYs = tf.oneHot(
+    trainImages.map(({ label }) => label),
+    2
+  );
+  const testXs = tf.stack(testImages.map(({ tensor }) => tensor));
+  const testYs = tf.oneHot(
+    testImages.map(({ label }) => label),
+    2
+  );
 
-  const net = new convnetjs.Net();
-  net.makeLayers(layerDefs);
+  // Build and compile the model
+  const model = modelResNet();
+  model.compile({
+    optimizer: tf.train.adam(LEARNING_RATE),
+    loss: 'categoricalCrossentropy',
+    metrics: ['accuracy'],
+  });
 
   // Train the model
-  const trainer = new convnetjs.Trainer(net, {
-    method: 'adadelta',
-    batch_size: BATCH_SIZE,
-    l2_decay: 0.001,
-    learning_rate: LEARNING_RATE,
-    momentum: 0.9,
-    clip_gradients: 5.0, // Add gradient clipping
+  await model.fit(trainXs, trainYs, {
+    epochs: EPOCHS,
+    batchSize: BATCH_SIZE,
+    validationData: [testXs, testYs],
   });
 
-  let percentDone = 0;
-  for (let epoch = 0;epoch < EPOCHS;epoch++) {
-
-    shuffleArray(trainImages, rng);
-
-    for (let i = 0; i < trainImages.length; i += BATCH_SIZE) {
-      for (let j = 0; j < BATCH_SIZE && i + j < trainImages.length; j++) {
-        percentDone = (i + j) / (trainImages.length * EPOCHS);
-
-        const { vol, label, fileName } = trainImages[i + j];
-        const stats = trainer.train(vol, label);
-        const loss = stats.loss;
-
-        print(label, loss, fileName);
-        printPercentDone(percentDone);
-      }
-    }
-  }
-
   // Save the trained model
-  saveNetwork(net, MODEL_SAVE_PATH);
+  await model.save('file://./trained_model');
 
-  for (const { vol, label, fileName } of testImages) {
-    const prediction = net.forward(vol);
-
-    const p = prediction.w[0];
-    print(label, p, fileName);
-  }
-  for (const { vol, label, fileName } of trainImages) {
-    const prediction = net.forward(vol);
-    const p = prediction.w[0];
-    print(label, p, fileName);
-  }
+  // Evaluate the model on test data
+  const evalResult = model.evaluate(testXs, testYs);
+  console.log(`Test loss: ${evalResult[0].dataSync()}`);
+  console.log(`Test accuracy: ${evalResult[1].dataSync()}`);
 })();
-
-const print = (label, prediction, fileName) => {
-  const bars = getBarsFromPercent(prediction);
-  const color = label === 1 ? red : green;
-
-  console.log(
-    color + prediction.toFixed(4) + ' ' + bars + ' ' + fileName + reset
-  );
-};
-
-const printPercentDone = (percent) => {
-  const bars = getBarsFromPercent(percent);
-  console.log(bars + ' ' + (percent * 100).toFixed(2) + '%');
-};
