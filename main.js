@@ -9,7 +9,7 @@ const IMAGE_SIZE = 128;
 const BATCH_SIZE = 32;
 const TRAIN_TEST_SPLIT = 0.8;
 const EPOCHS = 1;
-const LEARNING_RATE = 0.001;
+const LEARNING_RATE = 0.0001;
 const SEED = 5;
 const MODEL_SAVE_PATH = './trained_model.json';
 
@@ -68,6 +68,8 @@ const reset = '\x1b[0m';
 const blockChar = '█';
 const dashChar = '─';
 const getBarsFromPercent = (percent) => {
+  percent = Math.min(1, Math.max(0, percent));
+
   const width = 30;
   const progress = Math.round(width * percent);
   const bar =
@@ -159,5 +161,7 @@ const print = (label, prediction, fileName) => {
   const bars = getBarsFromPercent(prediction);
   const color = label === 1 ? red : green;
 
-  console.log(color + prediction.toFixed(4) + bars + fileName + reset);
+  console.log(
+    color + prediction.toFixed(4) + ' ' + bars + ' ' + fileName + reset
+  );
 };
