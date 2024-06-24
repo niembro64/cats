@@ -9,11 +9,17 @@ const IMAGE_SIZE = 128;
 const BATCH_SIZE = 32;
 const TRAIN_TEST_SPLIT = 0.8;
 const EPOCHS = 1;
-const LEARNING_RATE = 0.01;
+const LEARNING_RATE = 0.001;
 const SEED = 5;
+const MODEL_SAVE_PATH = './trained_model.json';
 
 // Set global seeds
-seedrandom(SEED);
+const rng = seedrandom(SEED);
+Math.random = rng;
+convnetjs.randf = (a, b) => a + (b - a) * rng();
+convnetjs.randi = (a, b) => Math.floor(a + (b - a) * rng());
+convnetjs.randn = (mu, std) =>
+  mu + std * (Math.sqrt(-2 * Math.log(rng())) * Math.cos(2 * Math.PI * rng()));
 
 // Helper function to load images and convert them to Vol objects
 async function loadImagesFromFolder(folderPath, label) {
@@ -32,12 +38,27 @@ async function loadImagesFromFolder(folderPath, label) {
         vol.w[(i / 3) * 3 + 1] = imageBuffer[i + 1] / 255.0; // G
         vol.w[(i / 3) * 3 + 2] = imageBuffer[i + 2] / 255.0; // B
       }
-      imageElements.push({ vol, label });
+      imageElements.push({ vol, label, fileName: file });
     } catch (error) {
       console.error(`Error processing image ${file}: ${error.message}`);
     }
   }
   return imageElements;
+}
+
+// Function to save the network to a file
+function saveNetwork(net, filePath) {
+  const json = net.toJSON();
+  fs.writeFileSync(filePath, JSON.stringify(json));
+  console.log(`Model saved to ${filePath}`);
+}
+
+// Shuffle function that uses the seed
+function shuffleArray(array, rng) {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
 }
 
 // Load all images
@@ -48,7 +69,7 @@ async function loadImagesFromFolder(folderPath, label) {
   const allImages = cats.concat(notCats);
 
   // Shuffle and split data into training and testing sets
-  allImages.sort(() => Math.random() - 0.5);
+  shuffleArray(allImages, rng);
   const splitIndex = Math.floor(TRAIN_TEST_SPLIT * allImages.length);
   const trainImages = allImages.slice(0, splitIndex);
   const testImages = allImages.slice(splitIndex);
@@ -96,23 +117,36 @@ async function loadImagesFromFolder(folderPath, label) {
     let batchLoss = 0;
     for (let i = 0; i < trainImages.length; i += BATCH_SIZE) {
       for (let j = 0; j < BATCH_SIZE && i + j < trainImages.length; j++) {
-        const { vol, label } = trainImages[i + j];
+        const { vol, label, fileName } = trainImages[i + j];
         const stats = trainer.train(vol, label);
         batchLoss += stats.loss;
+        console.log(
+          `Epoch ${epoch + 1}, Sample ${
+            i + j + 1
+          }, File: ${fileName}, Label: ${label}, Loss: ${stats.loss}`
+        );
       }
       console.log(
-        `Epoch ${epoch + 1}, Batch ${Math.floor(i / BATCH_SIZE) + 1}, Loss: ${
-          batchLoss / BATCH_SIZE
-        }`
+        `Epoch ${epoch + 1}, Batch ${
+          Math.floor(i / BATCH_SIZE) + 1
+        }, Average Loss: ${batchLoss / BATCH_SIZE}`
       );
+      batchLoss = 0; // Reset batch loss after each batch
     }
   }
+
+  // Save the trained model
+  saveNetwork(net, MODEL_SAVE_PATH);
 
   // Evaluate the model
   let correct = 0;
   for (const { vol, label } of testImages) {
     const prediction = net.forward(vol);
     const predictedLabel = prediction.w[1] > prediction.w[0] ? 1 : 0;
+
+    console.log(
+      `Predicted: ${predictedLabel}, Actual: ${label}, Confidence: ${prediction.w[predictedLabel]}`
+    );
     if (predictedLabel === label) correct++;
   }
   console.log(
