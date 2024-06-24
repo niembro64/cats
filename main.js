@@ -18,7 +18,7 @@ function loadImagesFromFolder(folderPath, label) {
   }));
 }
 
-const useSmall = false;
+const useSmall = true;
 
 // Load all images
 const cats = loadImagesFromFolder(useSmall ? './cats_small' : './cats', 1);
@@ -48,10 +48,29 @@ function preprocessImage(imagePath) {
 function createDataset(imagePaths, batchSize) {
   const dataset = tf.data.generator(function* () {
     for (let imageInfo of imagePaths) {
-      const { imagePath, label } = imageInfo;
-      const imageTensor = preprocessImage(imagePath);
-      const labelTensor = tf.tensor1d([label]);
-      yield { xs: imageTensor, ys: labelTensor };
+      const { imagePath, label, filename } = imageInfo;
+      try {
+        let imageTensor = preprocessImage(imagePath);
+        if (imageTensor.shape.length === 4 && imageTensor.shape[0] === 1) {
+          imageTensor = imageTensor.squeeze([0]);
+        }
+        if (imageTensor.shape.length !== 3 || imageTensor.shape[2] !== 3) {
+          console.error(
+            `Skipping image: ${filename} due to unexpected shape: ${imageTensor.shape}`
+          );
+          continue;
+        }
+        const labelTensor = tf.tensor1d([label]);
+        // Check and print shape
+        console.log(
+          `Processed image: ${filename}, shape: ${imageTensor.shape}`
+        );
+        yield { xs: imageTensor, ys: labelTensor };
+      } catch (err) {
+        console.error(
+          `Error processing image: ${filename}, error: ${err.message}`
+        );
+      }
     }
   });
   return dataset.batch(batchSize);
@@ -86,14 +105,42 @@ model.compile({
   metrics: ['accuracy'],
 });
 
-// Train the model
+// Train the model with detailed logging
 async function trainModel() {
+  const startTime = Date.now();
+
   await model.fitDataset(trainDataset, {
     epochs: EPOCHS,
     validationData: testDataset,
+    callbacks: {
+      onEpochEnd: (epoch, logs) => {
+        console.log(
+          `Epoch ${epoch + 1} / ${EPOCHS}: loss = ${logs.loss.toFixed(
+            4
+          )}, accuracy = ${(logs.acc * 100).toFixed(
+            2
+          )}%, val_loss = ${logs.val_loss.toFixed(4)}, val_accuracy = ${(
+            logs.val_acc * 100
+          ).toFixed(2)}%`
+        );
+      },
+      onBatchEnd: (batch, logs) => {
+        console.log(
+          `Batch ${batch + 1}: loss = ${logs.loss.toFixed(4)}, accuracy = ${(
+            logs.acc * 100
+          ).toFixed(2)}%`
+        );
+      },
+    },
   });
-  console.log('Model training complete.');
-  evaluateModel();
+
+  const endTime = Date.now();
+  console.log(
+    `Model training complete. Training time: ${
+      (endTime - startTime) / 1000
+    } seconds`
+  );
+  await evaluateModel();
   await saveModel();
   await predictOnTestData();
 }
